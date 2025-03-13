@@ -9,6 +9,18 @@ pub export fn add(a: i32, b: i32) i32 {
     return a + b;
 }
 
+pub const Version = enum {
+    V1_1,
+    V2_0,
+
+    pub fn toString(self: Version) []const u8 {
+        return switch (self) {
+            .V1_1 => "HTTP/1.1",
+            .V2_0 => "HTTP/2.0"
+        };
+    }
+};
+
 pub const Method = enum {
     GET,
     POST,
@@ -69,6 +81,7 @@ pub const Headers = struct {
 
 pub const Client = struct {
     method: Method = Method.GET,
+    version: Version = Version.V1_1,
     path: []const u8 = "/",
     parameters: ?std.AutoHashMap([]const u8, []const u8) = null,
     headers: Headers = Headers{},
@@ -77,6 +90,10 @@ pub const Client = struct {
 
     pub fn setMethod(self: *Client, method: Method) void {
         self.method = method;
+    }
+
+    pub fn serVersion(self: *Client, version: Version) void {
+        self.version = version;
     }
 
     pub fn setPath(self: *Client, path: []const u8) void {
@@ -118,7 +135,9 @@ pub const Client = struct {
                 }
             }
         }
-        payload.appendSlice(" HTTP/1.1\r\n") catch |err| {return err;};
+        payload.appendSlice(" ") catch |err| {return err;};
+        payload.appendSlice(self.version.toString()) catch |err| {return err;};
+        payload.appendSlice("\r\n") catch |err| {return err;};
         const headers_fields = std.meta.fields(Headers);
         inline for (headers_fields) |field| {
             const value: ?[]const u8 = @field(self.headers, field.name);
