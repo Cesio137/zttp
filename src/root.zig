@@ -9,11 +9,11 @@ pub export fn add(a: i32, b: i32) i32 {
     return a + b;
 }
 
-pub const Version = enum {
+pub const EVersion = enum {
     V1_1,
     V2_0,
 
-    pub fn toString(self: Version) []const u8 {
+    pub fn toString(self: EVersion) []const u8 {
         return switch (self) {
             .V1_1 => "HTTP/1.1",
             .V2_0 => "HTTP/2.0"
@@ -21,7 +21,7 @@ pub const Version = enum {
     }
 };
 
-pub const Method = enum {
+pub const EMethod = enum {
     GET,
     POST,
     PUT,
@@ -31,7 +31,7 @@ pub const Method = enum {
     OPTIONS,
     TRACE,
 
-    pub fn toString(self: Method) []const u8 {
+    pub fn toString(self: EMethod) []const u8 {
         return switch (self) {
             .GET => "GET",
             .POST => "POST",
@@ -72,95 +72,70 @@ pub const Headers = struct {
     Range: ?[]const u8 = null,
     Referer: ?[]const u8 = null,
     TE: ?[]const u8 = null,
-    User_Agent: []const u8 = "HTTPZ",
+    User_Agent: []const u8 = null,
     Upgrade: ?[]const u8 = null,
     Via: ?[]const u8 = null,
     Warning: ?[]const u8 = null,
 };
 
-
-pub const Client = struct {
-    method: Method = Method.GET,
-    version: Version = Version.V1_1,
+pub const Payload = struct {
+    method: EMethod = EMethod.GET,
+    version: EVersion = EVersion.V1_1,
     path: []const u8 = "/",
     parameters: ?std.AutoHashMap([]const u8, []const u8) = null,
     headers: Headers = Headers{},
     body: ?[]const u8 = null,
+};
+
+pub const Client = struct {
     payload: ?[]const u8 = null,
 
-    pub fn setMethod(self: *Client, method: Method) void {
-        self.method = method;
-    }
-
-    pub fn serVersion(self: *Client, version: Version) void {
-        self.version = version;
-    }
-
-    pub fn setPath(self: *Client, path: []const u8) void {
-        self.path = path;
-    }
-
-    pub fn setHeaders(self: *Client, headers: Headers) void {
-        self.headers = headers;
-    }
-
-    pub fn setParameters(self: *Client, parameters: std.AutoHashMap([]const u8, []const u8)) void {
-        self.parameters = parameters;
-    }
-
-    pub fn setBody(self: *Client, body: []const u8) void {
-        self.body = body;
-    }
-
-    pub fn setPayload(self: *Client, payload: []const u8) void {
-        self.payload = payload;
-    }
-
-    pub fn preparePayload(self: *Client) std.mem.Allocator.Error!void {
+    pub fn createPayload(self: *Client, payload: Payload) std.mem.Allocator.Error!void {
         const page_alloc = std.heap.page_allocator;
-        var payload = std.ArrayList(u8).init(page_alloc);
-        defer payload.deinit();
-        payload.appendSlice(self.method.toString()) catch |err| {return err;};
-        payload.appendSlice(" ") catch |err| {return err;};
-        payload.appendSlice(self.path) catch |err| {return err;};
-        if (self.parameters) |params| {
-            payload.appendSlice("?") catch |err| {return err;};
+        var encoder = std.ArrayList(u8).init(page_alloc);
+        defer encoder.deinit();
+        encoder.appendSlice(payload.method.toString()) catch |err| {return err;};
+        encoder.appendSlice(" ") catch |err| {return err;};
+        encoder.appendSlice(payload.path) catch |err| {return err;};
+        if (payload.parameters) |params| {
+            encoder.appendSlice("?") catch |err| {return err;};
             var iterator = params.iterator();
             while (iterator.next()) |entry| {
-                payload.appendSlice(entry.key_ptr.*) catch |err| {return err;};
-                payload.appendSlice("=") catch |err| {return err;};
-                payload.appendSlice(entry.value_ptr.*) catch |err| {return err;};
+                encoder.appendSlice(entry.key_ptr.*) catch |err| {return err;};
+                encoder.appendSlice("=") catch |err| {return err;};
+                encoder.appendSlice(entry.value_ptr.*) catch |err| {return err;};
                 if (iterator.next()) |_| {
-                    payload.appendSlice("&") catch |err| {return err;};
+                    encoder.appendSlice("&") catch |err| {return err;};
                 }
             }
         }
-        payload.appendSlice(" ") catch |err| {return err;};
-        payload.appendSlice(self.version.toString()) catch |err| {return err;};
-        payload.appendSlice("\r\n") catch |err| {return err;};
+        encoder.appendSlice(" ") catch |err| {return err;};
+        encoder.appendSlice(payload.version.toString()) catch |err| {return err;};
+        encoder.appendSlice("\r\n") catch |err| {return err;};
         const headers_fields = std.meta.fields(Headers);
         inline for (headers_fields) |field| {
-            const value: ?[]const u8 = @field(self.headers, field.name);
+            const value: ?[]const u8 = @field(payload.headers, field.name);
             if (value) |v| {
-                payload.appendSlice(field.name) catch |err| {return err;};
-                payload.appendSlice(": ") catch |err| {return err;};
-                payload.appendSlice(v) catch |err| {return err;};
-                payload.appendSlice("\r\n") catch |err| {return err;};
+                encoder.appendSlice(field.name) catch |err| {return err;};
+                encoder.appendSlice(": ") catch |err| {return err;};
+                encoder.appendSlice(v) catch |err| {return err;};
+                encoder.appendSlice("\r\n") catch |err| {return err;};
             }
         }
-        payload.appendSlice("\r\n") catch |err| {return err;};
-        if (self.body) |body| {
-            payload.appendSlice(body) catch |err| {return err;};
+        encoder.appendSlice("\r\n") catch |err| {return err;};
+        if (payload.body) |body| {
+            encoder.appendSlice(body) catch |err| {return err;};
         }
-        self.setPayload(payload.toOwnedSlice() catch |err| {return err;});
+        self.payload = encoder.toOwnedSlice() catch |err| {return err;};
     }
 };
 
 test "http_test" {
     try testing.expect(add(3, 7) == 10);
     var http_client: Client = .{};
-    http_client.setBody("Hello, world!");
-    try http_client.preparePayload();
+    try http_client.createPayload(Payload {
+        .body = "Hello, world!"
+    });
     std.debug.print("{s}\n", .{http_client.payload.?});
     //const allocator = std.heap.GeneralPurposeAllocator(.{}).init;
     //const address = try net.Address.parseIp4("127.0.0.1", 3000);
